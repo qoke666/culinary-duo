@@ -2,50 +2,36 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"/>
-<title>Culinary Duo</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Culinary Duo: Overcooked style</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <style>
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,Arial;background:#fff8f0;color:#333;}
-  .screen{height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:20px;box-sizing:border-box}
-  button{padding:12px 24px;margin:8px;border:none;border-radius:8px;font-size:1em;cursor:pointer}
-  .chef{background:#ffcc80}
-  .mgr{background:#81c784;color:#fff}
-  #copyBtn{background:#4fc3f7;color:#fff}
-  .log{background:#f1f8e9;padding:6px;margin-top:8px;font-size:.85em;border-radius:4px;max-height:200px;overflow-y:auto}
-  .hide{display:none}
+  html,body{margin:0;height:100%;overflow:hidden;font-family:Arial}
+  #gameCanvas{background:#222;display:block;margin:0 auto;image-rendering:pixelated}
+  #hud{position:absolute;top:4px;left:4px;color:#fff;font-size:16px;text-shadow:1px 1px 0 #000}
+  #rolePick{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:20px;border-radius:8px;text-align:center}
+  button{margin:6px;padding:10px 20px;border:none;border-radius:6px;font-size:1em;cursor:pointer}
+  .chefBtn{background:#ff7043;color:#fff}
+  .mgrBtn{background:#81c784;color:#fff}
 </style>
 </head>
 <body>
-
-<!-- Экран выбора роли -->
-<div id="chooseScreen" class="screen">
-  <h1>Culinary Duo</h1>
-  <p>Выбери свою роль:</p>
-  <button class="chef" onclick="chooseRole('chef')">👨‍🍳 Шеф-повар</button>
-  <button class="mgr"  onclick="chooseRole('manager')">🤵 Менеджер</button>
+<!-- выбор роли -->
+<div id="rolePick">
+  <h2>👨‍🍳🤵 Выбери роль</h2>
+  <button class="chefBtn" onclick="pickRole('chef')">Шеф-повар</button>
+  <button class="mgrBtn"  onclick="pickRole('manager')">Менеджер</button>
+  <p id="inviteText" style="display:none">Комната: <b id="roomCode"></b>
+  <br><button onclick="shareInvite()">🔗 Пригласить друга</button></p>
 </div>
 
-<!-- Экран ожидания / приглашения -->
-<div id="inviteScreen" class="screen hide">
-  <h2 id="roleTitle"></h2>
-  <p>Комната: <b id="roomIdDisplay"></b></p>
-  <button id="copyBtn" onclick="shareLink()">🔗 Пригласить друга</button>
-  <p id="waitText">Ожидание второго игрока…</p>
-</div>
+<canvas id="gameCanvas"></canvas>
+<div id="hud">💰 <span id="score">0</span> | ⏱️ <span id="timer">120</span></div>
 
-<!-- Экран игры -->
-<div id="gameScreen" class="screen hide">
-  <div id="money">💰 0</div>
-  <div id="buttons"></div>
-  <div class="log" id="log"></div>
-</div>
-
-<!-- Firebase -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
-/* === ТВОЯ FIREBASE-КОНФИГУРАЦИЯ === */
+/* === Firebase config === */
 const firebaseConfig = {
   apiKey: "AIzaSyA00nPNOm9OIXcqIv-Ls4lxwUnPzHM7TE0",
   authDomain: "culinary-duo-80f1f.firebaseapp.com",
@@ -53,165 +39,160 @@ const firebaseConfig = {
   projectId: "culinary-duo-80f1f",
   storageBucket: "culinary-duo-80f1f.firebasestorage.app",
   messagingSenderId: "580643606813",
-  appId: "1:580643606813:web:b38b69e952bf21187bd1f4",
-  measurementId: "G-W4C40CY37G"
+  appId: "1:580643606813:web:b38b69e952bf21187bd1f4"
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
-/* ---------------------------------- */
 
-/* Telegram Web App */
+/* === настройки === */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const TILE = 40;
+const W = 20, H = 15;
+canvas.width  = TILE * W;
+canvas.height = TILE * H;
+
+let roomId, role, dbRef;
 const tg = window.Telegram.WebApp;
-tg.ready();
-tg.expand();
+tg.ready(); tg.expand();
 
-/* переменные */
-let roomId, role, state = {}, dbRef;
+/* === генерация комнаты === */
+function genRoom(){ return Math.random().toString(36).substr(2,4).toUpperCase(); }
 
-/* выбор роли */
-function chooseRole(r){
+/* === выбор роли === */
+function pickRole(r){
   role = r;
   roomId = new URLSearchParams(location.search).get('room') || genRoom();
-  history.replaceState({}, '', '?room=' + roomId);
+  history.replaceState({},'','?room='+roomId);
   dbRef = db.ref(roomId);
 
-  document.getElementById('chooseScreen').classList.add('hide');
-  document.getElementById('inviteScreen').classList.remove('hide');
-  document.getElementById('roleTitle').textContent = role === 'chef' ? '👨‍🍳 Шеф-повар' : '🤵 Менеджер';
-  document.getElementById('roomIdDisplay').textContent = roomId;
+  document.getElementById('rolePick').innerHTML =
+    `<h2>${r==='chef'?'👨‍🍳':'🤵'} Ждём второго игрока…</h2>
+     <p>Комната: <b>${roomId}</b></p>
+     <button onclick="shareInvite()">🔗 Пригласить друга</button>`;
 
-  /* регистрируем игрока и ждём второго */
-  dbRef.child('players').on('value', snap => {
-    const players = snap.val() || {};
-    players[role] = true;
-    dbRef.child('players').update(players);
-
-    if(Object.keys(players).length === 2){
-      document.getElementById('inviteScreen').classList.add('hide');
-      document.getElementById('gameScreen').classList.remove('hide');
-      startGame();
-    }
+  dbRef.child('players').update({[r]:true});
+  dbRef.child('players').on('value', snap=>{
+    if(Object.keys(snap.val()||{}).length===2) startGame();
   });
 }
-
-function genRoom(){
-  return Math.random().toString(36).substr(2,4).toUpperCase();
+function shareInvite(){
+  const url = location.origin+location.pathname+'?room='+roomId;
+  if(tg.shareLink){tg.shareLink(url,'Сыграй со мной!')}
+  else{navigator.clipboard.writeText(url); alert('Скопировано: '+url)}
 }
 
-/* кнопка «пригласить» в Telegram */
-function shareLink(){
-  const url = location.origin + location.pathname + '?room=' + roomId;
-  if(tg && tg.shareLink){
-    tg.shareLink(url, 'Присоединяйся к моей игре Culinary Duo!');
-  }else{
-    navigator.clipboard.writeText(url);
-    alert('Ссылка скопирована: ' + url);
-  }
-}
+/* === игровое состояние === */
+let state = {
+  players:{chef:{x:2,y:7,item:null}, manager:{x:17,y:7,item:null}},
+  orders:[],
+  ingredients:[{x:1,y:1,type:'tomato'},{x:1,y:13,type:'dough'}],
+  plates:[{x:9,y:7,status:'empty'}],
+  score:0,
+  timer:120
+};
 
-/* старт игры */
+/* === старт === */
 function startGame(){
-  dbRef.on('value', snap => {
-    state = snap.val() || {money:100,ingredients:0,recipes:[],ovenBroken:false};
-    document.getElementById('money').textContent = `💰 ${state.money}`;
-    renderButtons();
+  document.getElementById('rolePick').style.display='none';
+  dbRef.on('value', snap=>{
+    if(snap.exists()) state = snap.val();
+    render();
   });
-}
 
-function patch(updateObj){
-  dbRef.update(updateObj);
-}
-
-function renderButtons(){
-  const box = document.getElementById('buttons');
-  box.innerHTML='';
-  if(role==='chef'){
-    box.innerHTML += `<button class="chef" onclick="buyIng()">Купить ингредиенты (-10)</button>`;
-    box.innerHTML += `<button class="chef" onclick="createRec()">Создать блюдо (-20)</button>`;
-    if(state.ovenBroken) box.innerHTML += `<button class="chef" onclick="fixOv()">Починить духовку (-15)</button>`;
-  }else{
-    box.innerHTML += `<button class="mgr" onclick="setPrice()">Установить цену</button>`;
-    box.innerHTML += `<button class="mgr" onclick="campaign()">Рекламная кампания (-10)</button>`;
-    box.innerHTML += `<button class="mgr" onclick="rush()">Разместить официантов (-5)</button>`;
-  }
-}
-
-/* логика шефа */
-function buyIng(){
-  const cost=10;
-  if((state.money||0)<cost)return alert('Нет денег');
-  patch({money:state.money-cost,ingredients:(state.ingredients||0)+1});
-  log('Куплены ингредиенты');
-}
-function createRec(){
-  if((state.ingredients||0)<1)return alert('Нет ингредиентов');
-  const cost=20;
-  if((state.money||0)<cost)return alert('Нет денег');
-  const name=prompt('Название блюда');
-  if(!name)return;
-  const recipes=[...state.recipes||[],{name,price:0}];
-  patch({money:state.money-cost,ingredients:state.ingredients-1,recipes});
-  log(`Создано блюдо «${name}»`);
-}
-function fixOv(){
-  if(!state.ovenBroken)return alert('Не сломана');
-  const cost=15;
-  if((state.money||0)<cost)return alert('Нет денег');
-  patch({money:state.money-cost,ovenBroken:false});
-  log('Духовка починена');
-}
-
-/* логика менеджера */
-function setPrice(){
-  const dish=(state.recipes||[]).find(r=>!r.price);
-  if(!dish)return alert('Нет новых блюд');
-  const price=+prompt(`Цена для «${dish.name}»`);
-  if(!price)return;
-  dish.price=price;
-  patch({recipes:state.recipes});
-  log(`Цена ${price} для «${dish.name}»`);
-}
-function campaign(){
-  const cost=10;
-  if((state.money||0)<cost)return alert('Нет денег');
-  patch({money:state.money-cost,campaign:Date.now()});
-  log('Кампания запущена');
-}
-function rush(){
-  const cost=5;
-  if((state.money||0)<cost)return alert('Нет денег');
-  patch({money:state.money-cost,rush:Date.now()});
-  log('Официанты расставлены');
-}
-
-/* симуляция продаж и поломок */
-setInterval(()=>{
-  if(!dbRef) return;
-  let newState={...state};
-
-  if(Math.random()<0.03 && !newState.ovenBroken){
-    newState.ovenBroken=true;
-    log('⚠️ Духовка сломалась');
-  }
-
-  (newState.recipes||[]).forEach(d=>{
-    if(!d.price) return;
-    let sold = Math.floor(Math.random()*3);
-    if(newState.campaign && Date.now()-newState.campaign<10000) sold*=2;
-    if(newState.ovenBroken) sold=0;
-    if(sold){
-      d.sold=(d.sold||0)+sold;
-      newState.money+=sold*d.price;
-      log(`Продано ${sold} × «${d.name}»`);
+  /* управление */
+  window.addEventListener('keydown', e=>{
+    const me = state.players[role];
+    if(!me) return;
+    let dx=0,dy=0;
+    if(e.key==='ArrowUp'||e.key==='w'||e.key==='W') dy=-1;
+    if(e.key==='ArrowDown'||e.key==='s'||e.key==='S') dy=1;
+    if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') dx=-1;
+    if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') dx=1;
+    if(dx||dy){
+      const nx=me.x+dx, ny=me.y+dy;
+      if(nx>=0&&nx<W&&ny>=0&&ny<H){
+        me.x=nx; me.y=ny;
+        checkInteraction();
+        dbRef.child('players').update(state.players);
+      }
     }
   });
 
-  patch(newState);
-}, 3000);
+  /* таймер */
+  setInterval(()=>{
+    if(state.timer>0){
+      state.timer--;
+      dbRef.update({timer:state.timer});
+      document.getElementById('timer').textContent = state.timer;
+    }
+  },1000);
+}
 
-function log(text){
-  const d=document.getElementById('log');
-  d.textContent=text+'\n'+d.textContent.slice(0,300);
+/* === взаимодействия === */
+function checkInteraction(){
+  const me = state.players[role];
+  const on = (arr,prop) => arr.find(o=>o.x===me.x&&o.y===me.y);
+  /* ингредиент → в руки */
+  const ing = on(state.ingredients,'type');
+  if(ing && !me.item){
+    me.item = ing.type;
+    state.ingredients = state.ingredients.filter(i=>i!==ing);
+    dbRef.update({ingredients:state.ingredients});
+  }
+  /* плита → готовим */
+  const plate = on(state.plates,'status');
+  if(plate && me.item){
+    if(plate.status==='empty'){
+      plate.status = 'cooking_'+me.item;
+      me.item = null;
+      dbRef.update({plates:state.plates});
+      setTimeout(()=>{
+        plate.status='ready';
+        dbRef.update({plates:state.plates});
+      },3000);
+    }
+  }
+  /* выдача клиенту (менеджер) */
+  if(role==='manager' && plate && plate.status==='ready'){
+    state.score += 10;
+    plate.status='empty';
+    dbRef.update({score:state.score, plates:state.plates});
+    document.getElementById('score').textContent = state.score;
+  }
+}
+
+/* === рисуем === */
+function render(){
+  ctx.fillStyle='#222'; ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  /* столы */
+  ctx.fillStyle='#555';
+  for(let i=0;i<W;i++) for(let j=0;j<H;j++) ctx.fillRect(i*TILE,j*TILE,TILE-1,TILE-1);
+
+  /* ингредиенты */
+  state.ingredients.forEach(i=>{
+    ctx.fillStyle = i.type==='tomato' ? '#f44336' : '#ffeb3b';
+    ctx.fillRect(i.x*TILE+5,i.y*TILE+5,TILE-10,TILE-10);
+  });
+
+  /* плиты */
+  state.plates.forEach(p=>{
+    ctx.fillStyle = p.status==='empty' ? '#999' : p.status.includes('cooking') ? '#ff9800' : '#4caf50';
+    ctx.fillRect(p.x*TILE+5,p.y*TILE+5,TILE-10,TILE-10);
+  });
+
+  /* игроки */
+  ['chef','manager'].forEach(r=>{
+    const p = state.players[r];
+    if(!p) return;
+    ctx.fillStyle = r==='chef' ? '#ff7043' : '#81c784';
+    ctx.fillRect(p.x*TILE+2,p.y*TILE+2,TILE-4,TILE-4);
+    if(p.item){
+      ctx.fillStyle='#fff';
+      ctx.fillRect(p.x*TILE+TILE/2-4,p.y*TILE+TILE/2-4,8,8);
+    }
+  });
 }
 </script>
 </body>
