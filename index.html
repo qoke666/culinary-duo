@@ -3,35 +3,53 @@
 <head>
 <meta charset="utf-8"/>
 <title>Culinary Duo: Overcooked style</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;font-family:Arial}
+  html,body{margin:0;height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,Arial;background:#111;color:#fff}
+  /* главное меню */
+  #mainMenu{display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;background:#222}
+  #mainMenu button{width:220px;margin:12px;padding:16px;font-size:1.2em;border:none;border-radius:8px;cursor:pointer}
+  .playBtn{background:#ff7043;color:#fff}
+  .joinBtn{background:#81c784;color:#fff}
+  /* модалка ввода кода */
+  #joinModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);justify-content:center;align-items:center}
+  #joinBox{background:#fff;color:#000;padding:30px;border-radius:10px;text-align:center}
+  #joinBox input{padding:10px;font-size:1.2em;width:120px;text-align:center}
+  #joinBox button{margin:6px}
+  /* игра */
   #gameCanvas{background:#222;display:block;margin:0 auto;image-rendering:pixelated}
   #hud{position:absolute;top:4px;left:4px;color:#fff;font-size:16px;text-shadow:1px 1px 0 #000}
-  #rolePick{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:20px;border-radius:8px;text-align:center}
-  button{margin:6px;padding:10px 20px;border:none;border-radius:6px;font-size:1em;cursor:pointer}
-  .chefBtn{background:#ff7043;color:#fff}
-  .mgrBtn{background:#81c784;color:#fff}
 </style>
 </head>
 <body>
-<!-- выбор роли -->
-<div id="rolePick">
-  <h2>👨‍🍳🤵 Выбери роль</h2>
-  <button class="chefBtn" onclick="pickRole('chef')">Шеф-повар</button>
-  <button class="mgrBtn"  onclick="pickRole('manager')">Менеджер</button>
-  <p id="inviteText" style="display:none">Комната: <b id="roomCode"></b>
-  <br><button onclick="shareInvite()">🔗 Пригласить друга</button></p>
+
+<!-- 1. Главное меню -->
+<div id="mainMenu">
+  <h1>Culinary Duo</h1>
+  <button class="playBtn" onclick="createRoom()">Играть</button>
+  <button class="joinBtn" onclick="openJoinModal()">Присоединиться</button>
 </div>
 
+<!-- 2. Модалка ввода кода -->
+<div id="joinModal">
+  <div id="joinBox">
+    <h2>Введите код комнаты</h2>
+    <input id="roomInput" maxlength="4" placeholder="ABCD"/>
+    <br>
+    <button onclick="joinRoom()">Подключиться</button>
+    <button onclick="closeJoinModal()">Отмена</button>
+  </div>
+</div>
+
+<!-- 3. Игра -->
 <canvas id="gameCanvas"></canvas>
-<div id="hud">💰 <span id="score">0</span> | ⏱️ <span id="timer">120</span></div>
+<div id="hud" style="display:none">💰 <span id="score">0</span> | ⏱️ <span id="timer">120</span></div>
 
 <script>
-/* === Firebase config === */
+/* === Firebase === */
 const firebaseConfig = {
   apiKey: "AIzaSyA00nPNOm9OIXcqIv-Ls4lxwUnPzHM7TE0",
   authDomain: "culinary-duo-80f1f.firebaseapp.com",
@@ -43,156 +61,134 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
-
-/* === настройки === */
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const TILE = 40;
-const W = 20, H = 15;
-canvas.width  = TILE * W;
-canvas.height = TILE * H;
+const tg = window.Telegram.WebApp; tg.ready(); tg.expand();
 
 let roomId, role, dbRef;
-const tg = window.Telegram.WebApp;
-tg.ready(); tg.expand();
 
-/* === генерация комнаты === */
-function genRoom(){ return Math.random().toString(36).substr(2,4).toUpperCase(); }
+/* ---------------- ГЛАВНОЕ МЕНЮ ---------------- */
+function createRoom(){
+  roomId = genRoom();
+  chooseRoleScreen();
+}
+function openJoinModal(){
+  document.getElementById('joinModal').style.display='flex';
+  document.getElementById('roomInput').focus();
+}
+function closeJoinModal(){
+  document.getElementById('joinModal').style.display='none';
+}
+function joinRoom(){
+  const code = document.getElementById('roomInput').value.trim().toUpperCase();
+  if(!code){alert('Введите код!');return}
+  roomId = code;
+  closeJoinModal();
+  chooseRoleScreen();
+}
+function genRoom(){
+  return Math.random().toString(36).substr(2,4).toUpperCase();
+}
 
-/* === выбор роли === */
+/* ---------------- выбор роли внутри комнаты ---------------- */
+function chooseRoleScreen(){
+  document.getElementById('mainMenu').style.display='none';
+  const div = document.createElement('div');
+  div.id = 'rolePick';
+  div.style.cssText='position:fixed;inset:0;background:#222;display:flex;flex-direction:column;justify-content:center;align-items:center;color:#fff';
+  div.innerHTML = `
+    <h2>Комната: ${roomId}</h2>
+    <button class="playBtn" onclick="pickRole('chef')">👨‍🍳 Шеф-повар</button>
+    <button class="joinBtn"  onclick="pickRole('manager')">🤵 Менеджер</button>
+    <button onclick="copyInvite()">🔗 Копировать приглашение</button>
+  `;
+  document.body.appendChild(div);
+}
+function copyInvite(){
+  const url = location.origin + location.pathname + '?room=' + roomId;
+  if(tg.shareLink){tg.shareLink(url,'Сыграй со мной!')}
+  else{navigator.clipboard.writeText(url);alert('Скопировано: '+url)}
+}
 function pickRole(r){
   role = r;
-  roomId = new URLSearchParams(location.search).get('room') || genRoom();
-  history.replaceState({},'','?room='+roomId);
   dbRef = db.ref(roomId);
-
-  document.getElementById('rolePick').innerHTML =
-    `<h2>${r==='chef'?'👨‍🍳':'🤵'} Ждём второго игрока…</h2>
-     <p>Комната: <b>${roomId}</b></p>
-     <button onclick="shareInvite()">🔗 Пригласить друга</button>`;
+  document.getElementById('rolePick').remove();
+  document.getElementById('hud').style.display='block';
 
   dbRef.child('players').update({[r]:true});
   dbRef.child('players').on('value', snap=>{
     if(Object.keys(snap.val()||{}).length===2) startGame();
   });
 }
-function shareInvite(){
-  const url = location.origin+location.pathname+'?room='+roomId;
-  if(tg.shareLink){tg.shareLink(url,'Сыграй со мной!')}
-  else{navigator.clipboard.writeText(url); alert('Скопировано: '+url)}
-}
 
-/* === игровое состояние === */
+/* ---------------- Overcooked-игра ---------------- */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const TILE = 40, W = 20, H = 15;
+canvas.width = TILE*W; canvas.height = TILE*H;
+
 let state = {
-  players:{chef:{x:2,y:7,item:null}, manager:{x:17,y:7,item:null}},
-  orders:[],
+  players:{chef:{x:2,y:7,item:null},manager:{x:17,y:7,item:null}},
   ingredients:[{x:1,y:1,type:'tomato'},{x:1,y:13,type:'dough'}],
   plates:[{x:9,y:7,status:'empty'}],
+  orders:[],
   score:0,
   timer:120
 };
 
-/* === старт === */
 function startGame(){
-  document.getElementById('rolePick').style.display='none';
-  dbRef.on('value', snap=>{
-    if(snap.exists()) state = snap.val();
-    render();
-  });
-
-  /* управление */
-  window.addEventListener('keydown', e=>{
-    const me = state.players[role];
-    if(!me) return;
-    let dx=0,dy=0;
-    if(e.key==='ArrowUp'||e.key==='w'||e.key==='W') dy=-1;
-    if(e.key==='ArrowDown'||e.key==='s'||e.key==='S') dy=1;
-    if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') dx=-1;
-    if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') dx=1;
-    if(dx||dy){
-      const nx=me.x+dx, ny=me.y+dy;
-      if(nx>=0&&nx<W&&ny>=0&&ny<H){
-        me.x=nx; me.y=ny;
-        checkInteraction();
-        dbRef.child('players').update(state.players);
-      }
-    }
-  });
-
-  /* таймер */
+  dbRef.on('value',snap=>{if(snap.exists())state=snap.val();render();});
+  window.addEventListener('keydown',handleKey);
   setInterval(()=>{
     if(state.timer>0){
       state.timer--;
       dbRef.update({timer:state.timer});
-      document.getElementById('timer').textContent = state.timer;
+      document.getElementById('timer').textContent=state.timer;
     }
   },1000);
 }
 
-/* === взаимодействия === */
-function checkInteraction(){
-  const me = state.players[role];
-  const on = (arr,prop) => arr.find(o=>o.x===me.x&&o.y===me.y);
-  /* ингредиент → в руки */
-  const ing = on(state.ingredients,'type');
-  if(ing && !me.item){
-    me.item = ing.type;
-    state.ingredients = state.ingredients.filter(i=>i!==ing);
-    dbRef.update({ingredients:state.ingredients});
-  }
-  /* плита → готовим */
-  const plate = on(state.plates,'status');
-  if(plate && me.item){
-    if(plate.status==='empty'){
-      plate.status = 'cooking_'+me.item;
-      me.item = null;
-      dbRef.update({plates:state.plates});
-      setTimeout(()=>{
-        plate.status='ready';
-        dbRef.update({plates:state.plates});
-      },3000);
-    }
-  }
-  /* выдача клиенту (менеджер) */
-  if(role==='manager' && plate && plate.status==='ready'){
-    state.score += 10;
-    plate.status='empty';
-    dbRef.update({score:state.score, plates:state.plates});
-    document.getElementById('score').textContent = state.score;
+function handleKey(e){
+  const me=state.players[role]; if(!me)return;
+  let dx=0,dy=0;
+  if(e.key==='ArrowUp'||e.key==='w')dy=-1;
+  if(e.key==='ArrowDown'||e.key==='s')dy=1;
+  if(e.key==='ArrowLeft'||e.key==='a')dx=-1;
+  if(e.key==='ArrowRight'||e.key==='d')dx=1;
+  if(dx||dy){
+    const nx=me.x+dx,ny=me.y+dy;
+    if(nx>=0&&nx<W&&ny>=0&&ny<H){me.x=nx;me.y=ny;checkInteraction();dbRef.child('players').update(state.players);}
   }
 }
+function checkInteraction(){
+  const me=state.players[role];
+  const on=(arr)=>arr.find(o=>o.x===me.x&&o.y===me.y);
 
-/* === рисуем === */
+  /* берём ингредиент */
+  const ing=on(state.ingredients);
+  if(ing&&!me.item){me.item=ing.type;state.ingredients=state.ingredients.filter(i=>i!==ing);dbRef.update({ingredients:state.ingredients});}
+
+  /* кладём на плиту */
+  const plate=on(state.plates);
+  if(plate&&me.item&&plate.status==='empty'){
+    plate.status='cooking_'+me.item; me.item=null;
+    dbRef.update({plates:state.plates});
+    setTimeout(()=>{plate.status='ready'; dbRef.update({plates:state.plates});},3000);
+  }
+  /* менеджер относит клиенту */
+  if(role==='manager'&&plate&&plate.status==='ready'){
+    state.score+=10; plate.status='empty';
+    dbRef.update({score:state.score,plates:state.plates});
+    document.getElementById('score').textContent=state.score;
+  }
+}
 function render(){
   ctx.fillStyle='#222'; ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  /* столы */
   ctx.fillStyle='#555';
-  for(let i=0;i<W;i++) for(let j=0;j<H;j++) ctx.fillRect(i*TILE,j*TILE,TILE-1,TILE-1);
+  for(let i=0;i<W;i++)for(let j=0;j<H;j++)ctx.fillRect(i*TILE,j*TILE,TILE-1,TILE-1);
 
-  /* ингредиенты */
-  state.ingredients.forEach(i=>{
-    ctx.fillStyle = i.type==='tomato' ? '#f44336' : '#ffeb3b';
-    ctx.fillRect(i.x*TILE+5,i.y*TILE+5,TILE-10,TILE-10);
-  });
-
-  /* плиты */
-  state.plates.forEach(p=>{
-    ctx.fillStyle = p.status==='empty' ? '#999' : p.status.includes('cooking') ? '#ff9800' : '#4caf50';
-    ctx.fillRect(p.x*TILE+5,p.y*TILE+5,TILE-10,TILE-10);
-  });
-
-  /* игроки */
-  ['chef','manager'].forEach(r=>{
-    const p = state.players[r];
-    if(!p) return;
-    ctx.fillStyle = r==='chef' ? '#ff7043' : '#81c784';
-    ctx.fillRect(p.x*TILE+2,p.y*TILE+2,TILE-4,TILE-4);
-    if(p.item){
-      ctx.fillStyle='#fff';
-      ctx.fillRect(p.x*TILE+TILE/2-4,p.y*TILE+TILE/2-4,8,8);
-    }
-  });
+  /* рисуем объекты */
+  state.ingredients.forEach(i=>{ctx.fillStyle=i.type==='tomato'?'#f44336':'#ffeb3b';ctx.fillRect(i.x*TILE+5,i.y*TILE+5,TILE-10,TILE-10);});
+  state.plates.forEach(p=>{ctx.fillStyle=p.status==='empty'?'#999':p.status.includes('cooking')?'#ff9800':'#4caf50';ctx.fillRect(p.x*TILE+5,p.y*TILE+5,TILE-10,TILE-10);});
+  ['chef','manager'].forEach(r=>{const p=state.players[r];if(!p)return;ctx.fillStyle=r==='chef'?'#ff7043':'#81c784';ctx.fillRect(p.x*TILE+2,p.y*TILE+2,TILE-4,TILE-4);if(p.item){ctx.fillStyle='#fff';ctx.fillRect(p.x*TILE+TILE/2-4,p.y*TILE+TILE/2-4,8,8);}});
 }
 </script>
 </body>
